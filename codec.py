@@ -6,18 +6,32 @@ so it can be unit-tested without ever rendering or reading an image. The
 image layer (glyph_match.py / decode_pages.py) is responsible for turning
 a screenshot into the same page strings this module expects.
 """
-import gzip
 import hashlib
+import lzma
 import zlib
 from dataclasses import dataclass
 from typing import Dict, List
 
 import page_format as fmt
 
+# lzma's default dictionary at preset 9 is 64 MiB — comfortably covers a
+# whole multi-MB CAD/FEA file, so it can exploit repeats anywhere in the
+# file. gzip/zlib's window is a fixed 32 KiB, so on a file bigger than
+# that (any real .x_t/.inp) it structurally cannot see repetition beyond
+# 32 KiB apart. That's the whole reason for picking lzma here, not just a
+# "usually a bit smaller" default.
+_COMPRESS = lambda data: lzma.compress(data, preset=9 | lzma.PRESET_EXTREME)
+_DECOMPRESS = lzma.decompress
+
 _CHAR_TO_VAL = {c: i for i, c in enumerate(fmt.ALPHABET)}
 
 
 def crockford_encode(data: bytes) -> str:
+    # `value` must be masked back down to just the unconsumed `bits` after
+    # each byte — without it, `value` never shrinks and keeps absorbing
+    # the whole input as one ever-growing Python int, turning every
+    # shift/mask into an O(n)-bit operation and the whole loop into O(n^2)
+    # (measured: 100 KB of incompressible data took ~26s instead of <0.1s).
     bits = 0
     value = 0
     out = []
@@ -27,12 +41,15 @@ def crockford_encode(data: bytes) -> str:
         while bits >= 5:
             bits -= 5
             out.append(fmt.ALPHABET[(value >> bits) & 0x1F])
+        value &= (1 << bits) - 1
     if bits > 0:
         out.append(fmt.ALPHABET[(value << (5 - bits)) & 0x1F])
     return "".join(out)
 
 
 def crockford_decode(s: str) -> bytes:
+    # Same fix as crockford_encode: mask `value` back down each step so it
+    # stays a small int instead of silently growing across the whole input.
     bits = 0
     value = 0
     out = bytearray()
@@ -45,6 +62,7 @@ def crockford_decode(s: str) -> bytes:
         if bits >= 8:
             bits -= 8
             out.append((value >> bits) & 0xFF)
+        value &= (1 << bits) - 1
     return bytes(out)
 
 
@@ -56,7 +74,7 @@ def build_pages(data: bytes) -> List[str]:
     """Encode `data` into a list of fixed-width page strings (one string
     per page = prefix + body, all concatenated). Mirrors
     remote_side/generate_pages.py exactly; keep both in sync."""
-    compressed = gzip.compress(data, compresslevel=9)
+    compressed = _COMPRESS(data)
     payload = crockford_encode(compressed)
     sha256 = hashlib.sha256(data).hexdigest().upper()
     orig_len = len(data)
@@ -159,7 +177,7 @@ def assemble(pages: Dict[int, PageInfo]) -> bytes:
 
     payload = "".join(pages[i].payload for i in range(total))
     compressed = crockford_decode(payload)[:expected_compressed_len]
-    data = gzip.decompress(compressed)
+    data = _DECOMPRESS(compressed)
 
     if len(data) != expected_orig_len:
         raise ValueError(

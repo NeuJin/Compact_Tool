@@ -3,7 +3,7 @@ Turn a file into a sequence of dense, self-checking PNG "pages" meant to
 be displayed full-screen and screenshotted, then decoded back on another
 machine with local_side/decode_pages.py.
 
-Python 3.8, stdlib only (gzip/hashlib/zlib/struct) — no Pillow, no pip
+Python 3.8, stdlib only (lzma/hashlib/zlib/struct) — no Pillow, no pip
 installs, nothing beyond what ships with a bare Python install. Needs
 codec.py and page_format.py — either copied into this same folder (the
 standalone Compact_Tool layout) or one directory up in local_side/ (the
@@ -17,6 +17,7 @@ import argparse
 import hashlib
 import os
 import sys
+import time
 
 try:
     import codec
@@ -103,23 +104,35 @@ def generate_reference_sheet(out_dir: str) -> str:
 
 
 def generate_data_pages(input_file: str, out_dir: str) -> int:
+    print(f"Input: {input_file}", flush=True)
+    print("  reading + lzma + encoding ...", flush=True)
+    t0 = time.time()
+
     with open(input_file, "rb") as f:
         data = f.read()
 
     pages = codec.build_pages(data)
     sha256 = hashlib.sha256(data).hexdigest().upper()
-    print(f"Input: {input_file}")
-    print(f"  original:   {len(data)} bytes")
-    print(f"  SHA-256:    {sha256}")
-    print(f"  -> {len(pages)} page(s)")
+    print(f"  original:   {len(data)} bytes", flush=True)
+    print(f"  SHA-256:    {sha256}", flush=True)
+    print(f"  -> {len(pages)} page(s) ({time.time() - t0:.1f}s so far)", flush=True)
 
+    render_start = time.time()
+    report_every = max(1, min(10, len(pages)))
     for idx, page_str in enumerate(pages):
         rows = rows_from_page_string(page_str)
         pixels = render_page(rows)
         out_path = os.path.join(out_dir, f"page_{idx:04d}.png")
         png_writer.write_png_gray(out_path, fmt.CANVAS_W, fmt.CANVAS_H, pixels)
-        if idx % 25 == 0:
-            print(f"  rendered page {idx} / {len(pages)}")
+        if idx % report_every == 0 or idx == len(pages) - 1:
+            elapsed = time.time() - render_start
+            rate = (idx + 1) / elapsed if elapsed > 0 else 0
+            remaining = (len(pages) - idx - 1) / rate if rate > 0 else 0
+            print(
+                f"  rendered page {idx + 1} / {len(pages)}"
+                f"  ({elapsed:.0f}s elapsed, ~{remaining:.0f}s left)",
+                flush=True,
+            )
 
     return len(pages)
 
@@ -138,22 +151,22 @@ def main():
 
     if args.reference_sheet_only:
         out_path = generate_reference_sheet(args.out_dir)
-        print(f"Wrote reference sheet: {out_path}")
+        print(f"Wrote reference sheet: {out_path}", flush=True)
         return
 
     if not args.input_file:
-        print("Provide --input-file <path>, or use --reference-sheet-only.")
+        print("Provide --input-file <path>, or use --reference-sheet-only.", flush=True)
         sys.exit(1)
 
     total = generate_data_pages(args.input_file, args.out_dir)
-    print(f"Done. {total} page(s) written to {args.out_dir}")
-    print("Next steps:")
+    print(f"Done. {total} page(s) written to {args.out_dir}", flush=True)
+    print("Next steps:", flush=True)
     print("  1. If glyph_reference.png isn't already on the decoding machine, generate it "
-          "there: python generate_pages.py --reference-sheet-only --out-dir <dir>")
+          "there: python generate_pages.py --reference-sheet-only --out-dir <dir>", flush=True)
     print(f"  2. Open {args.out_dir} as a full-screen slideshow (any image viewer) and "
-          "screenshot each page, in any order.")
+          "screenshot each page, in any order.", flush=True)
     print("  3. On the decoding machine: python decode_pages.py --pages-dir <screenshots_dir> "
-          "--reference glyph_reference.png --out <reconstructed_file>")
+          "--reference glyph_reference.png --out <reconstructed_file>", flush=True)
 
 
 if __name__ == "__main__":

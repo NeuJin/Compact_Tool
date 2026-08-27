@@ -18,7 +18,7 @@ fit on one specific row.
 # confusion with 1, 1, 0, V under template matching / human reading).
 ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
-MAGIC = "5B02"  # format tag + version (v2: generalized multi-row prefix)
+MAGIC = "5B03"  # format tag + version (v3: lzma instead of gzip)
 
 # Canvas / grid geometry
 CANVAS_W = 1920
@@ -26,8 +26,8 @@ CANVAS_H = 1080
 MARGIN = 60
 MARKER_SIZE = 40  # px, solid black square corner markers
 
-GRID_COLS = 48
-GRID_ROWS = 18
+GRID_COLS = 68
+GRID_ROWS = 26
 
 # Fixed-width prefix fields, in order, concatenated with no separators.
 # (name, width)
