@@ -105,6 +105,8 @@ class CaptureApp:
         self.hotkey_enabled = tk.BooleanVar(value=False)
         self.hotkey_name = tk.StringVar(value="F9")
         self._hotkey_was_down = False
+        self._repeat_capturing = False
+        self._repeat_count = 0
 
         row1 = tk.Frame(root)
         row1.pack(fill="x", padx=8, pady=(8, 2))
@@ -136,9 +138,10 @@ class CaptureApp:
         tk.OptionMenu(row_hotkey, self.hotkey_name, *HOTKEY_OPTIONS.keys()).pack(side="left", padx=4)
         tk.Label(
             row_hotkey,
-            text="(bấm phím này ở BẤT KỲ cửa sổ nào đang active để chụp + lưu ngay)",
+            text="(bấm phím này ở BẤT KỲ cửa sổ nào đang active để tự chụp lặp lại mỗi 0.5s)",
             font=("Segoe UI", 9), fg="#555",
         ).pack(side="left", padx=6)
+        tk.Button(row_hotkey, text="Dừng chụp lặp", command=self._stop_repeat_capture, bg="#ffe0e0").pack(side="left", padx=6)
         self.hotkey_status = tk.Label(row_hotkey, text="(tắt)", font=("Segoe UI", 9, "bold"))
         self.hotkey_status.pack(side="left", padx=6)
 
@@ -254,6 +257,7 @@ class CaptureApp:
             self._hotkey_was_down = True  # ignore a key already held down at the moment of enabling
             self._hotkey_poll()
         else:
+            self._stop_repeat_capture()
             self.hotkey_status.configure(text="(tắt)", fg="black")
 
     def _hotkey_poll(self):
@@ -262,9 +266,36 @@ class CaptureApp:
         vk = HOTKEY_OPTIONS.get(self.hotkey_name.get(), 0x78)
         down = is_key_down(vk)
         if down and not self._hotkey_was_down:
-            self._capture_foreground_window()
+            self._start_repeat_capture()
         self._hotkey_was_down = down
         self.root.after(50, self._hotkey_poll)
+
+    def _start_repeat_capture(self):
+        if self._repeat_capturing:
+            return  # already running -- ignore an extra press instead of stacking loops
+        self._repeat_capturing = True
+        self._repeat_count = 0
+        self._repeat_tick()
+
+    def _repeat_tick(self):
+        if not self._repeat_capturing:
+            return
+        self._capture_foreground_window()
+        self._repeat_count += 1
+        self.hotkey_status.configure(
+            text=f"Đang tự động chụp mỗi 0.5s... (đã chụp {self._repeat_count})", fg="#0a0",
+        )
+        self.root.after(500, self._repeat_tick)
+
+    def _stop_repeat_capture(self):
+        if not self._repeat_capturing:
+            return
+        self._repeat_capturing = False
+        self._log(f"Đã dừng chụp lặp (tổng {self._repeat_count} ảnh).")
+        if self.hotkey_enabled.get():
+            self.hotkey_status.configure(text=f"Đang chờ phím {self.hotkey_name.get()}...", fg="#0a0")
+        else:
+            self.hotkey_status.configure(text="(tắt)", fg="black")
 
     def _capture_foreground_window(self):
         bbox, title = get_foreground_client_rect()
