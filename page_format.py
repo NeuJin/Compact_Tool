@@ -26,8 +26,8 @@ CANVAS_H = 1080
 MARGIN = 60
 MARKER_SIZE = 40  # px, solid black square corner markers
 
-GRID_COLS = 112
-GRID_ROWS = 43
+GRID_COLS = 68
+GRID_ROWS = 26
 
 # Fixed-width prefix fields, in order, concatenated with no separators.
 # (name, width)
