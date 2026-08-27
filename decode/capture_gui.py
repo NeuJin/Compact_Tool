@@ -70,7 +70,8 @@ class CaptureApp:
         row3.pack(fill="x", padx=8, pady=6)
         tk.Button(row3, text="Giải mã ngay", command=self.decode_now, bg="#dfffe0").pack(side="left")
         tk.Button(row3, text="Mở thư mục", command=self.open_folder).pack(side="left", padx=6)
-        tk.Button(row3, text="Xoá log", command=self.clear_log).pack(side="left")
+        tk.Button(row3, text="Xoá log", command=self.clear_log).pack(side="left", padx=(0, 6))
+        tk.Button(row3, text="Xoá hết ảnh (Reset)", command=self.reset_captures, bg="#ffe0e0").pack(side="left")
 
         self.log = scrolledtext.ScrolledText(root, height=16, font=("Consolas", 9))
         self.log.pack(fill="both", expand=True, padx=8, pady=(0, 8))
@@ -135,6 +136,35 @@ class CaptureApp:
 
     def clear_log(self):
         self.log.delete("1.0", "end")
+
+    def reset_captures(self):
+        folder = self.folder.get()
+        if not os.path.isdir(folder):
+            messagebox.showinfo("Không có gì để xoá", "Thư mục chưa tồn tại.")
+            return
+        images = [
+            p for p in glob.glob(os.path.join(folder, "*"))
+            if p.lower().endswith((".png", ".jpg", ".jpeg", ".bmp"))
+        ]
+        if not images:
+            messagebox.showinfo("Không có gì để xoá", "Thư mục hiện không có ảnh nào.")
+            return
+        if not messagebox.askyesno(
+            "Xác nhận xoá",
+            f"Xoá vĩnh viễn {len(images)} ảnh trong:\n{folder}\n\nKhông thể hoàn tác. Tiếp tục?",
+        ):
+            return
+        deleted = 0
+        for p in images:
+            try:
+                os.remove(p)
+                deleted += 1
+            except OSError as e:
+                self._log(f"Không xoá được {os.path.basename(p)}: {e}")
+        self._log(f"Đã xoá {deleted}/{len(images)} ảnh trong thư mục.")
+        self.preview_label.configure(image="", text="(chưa có ảnh)")
+        self._tkimg = None
+        self._refresh_count()
 
     def paste_from_clipboard(self):
         folder = self.folder.get()
