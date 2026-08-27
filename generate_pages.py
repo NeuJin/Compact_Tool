@@ -59,23 +59,22 @@ def render_page(rows) -> bytearray:
     for (cx, cy) in [(0, 0), (W - m, 0), (0, H - m), (W - m, H - m)]:
         fill_rect(cx, cy, cx + m, cy + m, 0)
 
-    grid_w = W - 2 * fmt.MARGIN
-    grid_h = H - 2 * fmt.MARGIN
-    cell_w = grid_w / fmt.GRID_COLS
-    cell_h = grid_h / fmt.GRID_ROWS
-    block = _fitting_block_size(cell_w, cell_h)
+    block = _fitting_block_size(fmt.CELL_W, fmt.CELL_H)
     glyph_w = bitmap_font.FONT_W * block
     glyph_h = bitmap_font.FONT_H * block
 
     for r, row_str in enumerate(rows):
         if len(row_str) != fmt.GRID_COLS:
             raise ValueError(f"row {r} has length {len(row_str)}, expected {fmt.GRID_COLS}")
-        cell_top = fmt.MARGIN + r * cell_h
         for c, ch in enumerate(row_str):
             glyph = bitmap_font.GLYPHS[ch]
-            cell_left = fmt.MARGIN + c * cell_w
-            gx0 = int(cell_left + (cell_w - glyph_w) / 2)
-            gy0 = int(cell_top + (cell_h - glyph_h) / 2)
+            # Use the SAME integer cell box glyph_match.py will slice out on
+            # decode (see page_format.ideal_cell_box docstring) instead of
+            # separately rounding cell position here — otherwise the two
+            # sides can silently disagree by a pixel once cells are small.
+            cx0, cy0, cx1, cy1 = fmt.ideal_cell_box(r, c)
+            gx0 = cx0 + (cx1 - cx0 - glyph_w) // 2
+            gy0 = cy0 + (cy1 - cy0 - glyph_h) // 2
             for gy, glyph_row in enumerate(glyph):
                 for gx, mark in enumerate(glyph_row):
                     if mark == "#":

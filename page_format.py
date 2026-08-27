@@ -26,8 +26,8 @@ CANVAS_H = 1080
 MARGIN = 60
 MARKER_SIZE = 40  # px, solid black square corner markers
 
-GRID_COLS = 68
-GRID_ROWS = 26
+GRID_COLS = 112
+GRID_ROWS = 43
 
 # Fixed-width prefix fields, in order, concatenated with no separators.
 # (name, width)
@@ -69,3 +69,26 @@ if BODY_ROWS < 1:
         f"GRID_COLS={GRID_COLS} too narrow: prefix alone needs {PREFIX_ROWS} of "
         f"GRID_ROWS={GRID_ROWS} rows, leaving no room for body payload"
     )
+
+_GRID_W = CANVAS_W - 2 * MARGIN
+_GRID_H = CANVAS_H - 2 * MARGIN
+CELL_W = _GRID_W / GRID_COLS
+CELL_H = _GRID_H / GRID_ROWS
+
+
+def ideal_cell_box(row: int, col: int):
+    """Integer (x0, y0, x1, y1) pixel box for grid cell (row, col) in the
+    UNSCALED canvas (i.e. before any capture-resolution correction).
+
+    generate_pages.py (glyph placement) and glyph_match.py (cell slicing,
+    before it applies scale/offset for the actual captured image) both
+    call this SAME function instead of each rounding their own copy of
+    the cell math — at large cell sizes independent rounding on each side
+    agreed closely enough not to matter, but once cells shrink to ~8-12px
+    (dense grids) a 1px disagreement is a large fraction of the glyph and
+    reads the wrong character outright, even on an undegraded image."""
+    x0 = MARGIN + col * CELL_W
+    y0 = MARGIN + row * CELL_H
+    x1 = x0 + CELL_W
+    y1 = y0 + CELL_H
+    return (round(x0), round(y0), round(x1), round(y1))
