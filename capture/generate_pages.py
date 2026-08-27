@@ -1,13 +1,14 @@
 """
 Turn a file into a sequence of dense, self-checking PNG "pages" meant to
 be displayed full-screen and screenshotted, then decoded back on another
-machine with local_side/decode_pages.py.
+machine with decode_pages.py.
 
 Python 3.8, stdlib only (lzma/hashlib/zlib/struct) — no Pillow, no pip
 installs, nothing beyond what ships with a bare Python install. Needs
-codec.py and page_format.py — either copied into this same folder (the
-standalone Compact_Tool layout) or one directory up in local_side/ (the
-Result_Capture monorepo layout); this file works unmodified in either.
+codec.py and page_format.py — either copied into this same folder, or one
+directory up in a sibling folder named "local_side" or "decode" (the two
+folder-naming conventions used across the repos this file lives in);
+works unmodified in any of them.
 
 Usage:
     python generate_pages.py --input-file part.x_t --out-dir pages_out
@@ -23,7 +24,9 @@ try:
     import codec
     import page_format as fmt
 except ImportError:
-    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "local_side")))
+    _here = os.path.dirname(os.path.abspath(__file__))
+    for _sibling in ("local_side", "decode"):
+        sys.path.insert(0, os.path.join(_here, "..", _sibling))
     import codec
     import page_format as fmt
 
