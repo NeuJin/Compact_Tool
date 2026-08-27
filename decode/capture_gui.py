@@ -104,6 +104,7 @@ class CaptureApp:
         self.reference_path = tk.StringVar(value=DEFAULT_REFERENCE)
         self.hotkey_enabled = tk.BooleanVar(value=False)
         self.hotkey_name = tk.StringVar(value="F9")
+        self.repeat_delay = tk.StringVar(value="0.5")
         self._hotkey_was_down = False
         self._repeat_capturing = False
         self._repeat_count = 0
@@ -130,20 +131,26 @@ class CaptureApp:
         self.paste_btn.pack(fill="x", padx=8, pady=(8, 2))
 
         row_hotkey = tk.Frame(root)
-        row_hotkey.pack(fill="x", padx=8, pady=(0, 8))
+        row_hotkey.pack(fill="x", padx=8, pady=(0, 2))
         tk.Checkbutton(
             row_hotkey, text="Bật phím tắt chụp nhanh:",
             variable=self.hotkey_enabled, command=self._on_hotkey_toggle,
         ).pack(side="left")
         tk.OptionMenu(row_hotkey, self.hotkey_name, *HOTKEY_OPTIONS.keys()).pack(side="left", padx=4)
-        tk.Label(
-            row_hotkey,
-            text="(bấm phím này ở BẤT KỲ cửa sổ nào đang active để tự chụp lặp lại mỗi 0.5s)",
-            font=("Segoe UI", 9), fg="#555",
-        ).pack(side="left", padx=6)
+        tk.Label(row_hotkey, text="mỗi").pack(side="left", padx=(8, 2))
+        tk.Entry(row_hotkey, textvariable=self.repeat_delay, width=5, justify="center").pack(side="left")
+        tk.Label(row_hotkey, text="giây").pack(side="left", padx=(2, 8))
         tk.Button(row_hotkey, text="Dừng chụp lặp", command=self._stop_repeat_capture, bg="#ffe0e0").pack(side="left", padx=6)
         self.hotkey_status = tk.Label(row_hotkey, text="(tắt)", font=("Segoe UI", 9, "bold"))
         self.hotkey_status.pack(side="left", padx=6)
+
+        row_hotkey2 = tk.Frame(root)
+        row_hotkey2.pack(fill="x", padx=8, pady=(0, 8))
+        tk.Label(
+            row_hotkey2,
+            text="(bấm phím này ở BẤT KỲ cửa sổ nào đang active — kể cả trên màn hình khác — để tự chụp lặp lại theo chu kỳ trên)",
+            font=("Segoe UI", 9), fg="#555",
+        ).pack(side="left")
 
         self.status_var = tk.StringVar(value="Chưa có ảnh nào.")
         tk.Label(root, textvariable=self.status_var, font=("Segoe UI", 10)).pack(pady=(0, 4))
@@ -277,15 +284,23 @@ class CaptureApp:
         self._repeat_count = 0
         self._repeat_tick()
 
+    def _get_repeat_delay_seconds(self):
+        try:
+            delay = float(self.repeat_delay.get())
+        except (ValueError, TypeError):
+            delay = 0.5
+        return max(0.1, delay)  # floor to avoid a near-0/negative value causing a runaway tight loop
+
     def _repeat_tick(self):
         if not self._repeat_capturing:
             return
         self._capture_foreground_window()
         self._repeat_count += 1
+        delay = self._get_repeat_delay_seconds()
         self.hotkey_status.configure(
-            text=f"Đang tự động chụp mỗi 0.5s... (đã chụp {self._repeat_count})", fg="#0a0",
+            text=f"Đang tự động chụp mỗi {delay:g}s... (đã chụp {self._repeat_count})", fg="#0a0",
         )
-        self.root.after(500, self._repeat_tick)
+        self.root.after(int(delay * 1000), self._repeat_tick)
 
     def _stop_repeat_capture(self):
         if not self._repeat_capturing:
