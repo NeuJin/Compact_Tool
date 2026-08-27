@@ -1,6 +1,10 @@
 """
 GUI: paste screenshots (Ctrl+V) straight into a capture folder, one after
-another, then decode them without leaving the window.
+another, then decode them without leaving the window. Also has a global
+hotkey mode: press one key (works even while the remote-viewer window
+has focus, not this one) to grab a screenshot of whatever window is
+currently in the foreground and save it — no PrtScn/Snipping Tool/
+Alt-Tab/Ctrl+V dance needed per page.
 
 Skips the "save each screenshot as a file by hand" step — take a
 screenshot/snip on the remote machine (or wherever), switch to this
@@ -11,6 +15,7 @@ reopening this tool mid-session doesn't overwrite earlier captures.
 Usage:
     python capture_gui.py
 """
+import ctypes
 import glob
 import os
 import re
@@ -28,6 +33,65 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_DIR = os.path.join(HERE, "captures")
 DEFAULT_REFERENCE = os.path.join(HERE, "glyph_reference.png")
 
+# ---- Windows API helpers (ctypes, stdlib only) for the hotkey capture mode ----
+
+_user32 = ctypes.windll.user32
+
+
+class _RECT(ctypes.Structure):
+    _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+
+
+class _POINT(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+
+def _make_process_dpi_aware():
+    # Without this, GetWindowRect/ClientToScreen and what ImageGrab actually
+    # captures can disagree on a scaled (>100%) display, shifting the crop.
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PER_MONITOR_AWARE_V2-ish
+    except Exception:
+        try:
+            _user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
+
+def get_foreground_client_rect():
+    """Returns ((left, top, right, bottom) in screen coords, window title)
+    for the current foreground window's CLIENT area (no title bar/borders),
+    or (None, None) if unavailable."""
+    hwnd = _user32.GetForegroundWindow()
+    if not hwnd:
+        return None, None
+    rect = _RECT()
+    if not _user32.GetClientRect(hwnd, ctypes.byref(rect)):
+        return None, None
+    top_left = _POINT(rect.left, rect.top)
+    bottom_right = _POINT(rect.right, rect.bottom)
+    _user32.ClientToScreen(hwnd, ctypes.byref(top_left))
+    _user32.ClientToScreen(hwnd, ctypes.byref(bottom_right))
+    title_buf = ctypes.create_unicode_buffer(256)
+    _user32.GetWindowTextW(hwnd, title_buf, 256)
+    bbox = (top_left.x, top_left.y, bottom_right.x, bottom_right.y)
+    return bbox, (title_buf.value or "(không có tiêu đề)")
+
+
+def is_key_down(vk_code):
+    return bool(_user32.GetAsyncKeyState(vk_code) & 0x8000)
+
+
+HOTKEY_OPTIONS = {
+    "F9": 0x78,
+    "F10": 0x79,
+    "F11": 0x7A,
+    "F12": 0x7B,
+    "Scroll Lock": 0x91,
+    "Pause": 0x13,
+}
+
 
 class CaptureApp:
     def __init__(self, root):
@@ -38,6 +102,9 @@ class CaptureApp:
 
         self.folder = tk.StringVar(value=DEFAULT_DIR)
         self.reference_path = tk.StringVar(value=DEFAULT_REFERENCE)
+        self.hotkey_enabled = tk.BooleanVar(value=False)
+        self.hotkey_name = tk.StringVar(value="F9")
+        self._hotkey_was_down = False
 
         row1 = tk.Frame(root)
         row1.pack(fill="x", padx=8, pady=(8, 2))
@@ -58,7 +125,22 @@ class CaptureApp:
             height=3,
             command=self.paste_from_clipboard,
         )
-        self.paste_btn.pack(fill="x", padx=8, pady=8)
+        self.paste_btn.pack(fill="x", padx=8, pady=(8, 2))
+
+        row_hotkey = tk.Frame(root)
+        row_hotkey.pack(fill="x", padx=8, pady=(0, 8))
+        tk.Checkbutton(
+            row_hotkey, text="Bật phím tắt chụp nhanh:",
+            variable=self.hotkey_enabled, command=self._on_hotkey_toggle,
+        ).pack(side="left")
+        tk.OptionMenu(row_hotkey, self.hotkey_name, *HOTKEY_OPTIONS.keys()).pack(side="left", padx=4)
+        tk.Label(
+            row_hotkey,
+            text="(bấm phím này ở BẤT KỲ cửa sổ nào đang active để chụp + lưu ngay)",
+            font=("Segoe UI", 9), fg="#555",
+        ).pack(side="left", padx=6)
+        self.hotkey_status = tk.Label(row_hotkey, text="(tắt)", font=("Segoe UI", 9, "bold"))
+        self.hotkey_status.pack(side="left", padx=6)
 
         self.status_var = tk.StringVar(value="Chưa có ảnh nào.")
         tk.Label(root, textvariable=self.status_var, font=("Segoe UI", 10)).pack(pady=(0, 4))
@@ -166,6 +248,44 @@ class CaptureApp:
         self._tkimg = None
         self._refresh_count()
 
+    def _on_hotkey_toggle(self):
+        if self.hotkey_enabled.get():
+            self.hotkey_status.configure(text=f"Đang chờ phím {self.hotkey_name.get()}...", fg="#0a0")
+            self._hotkey_was_down = True  # ignore a key already held down at the moment of enabling
+            self._hotkey_poll()
+        else:
+            self.hotkey_status.configure(text="(tắt)", fg="black")
+
+    def _hotkey_poll(self):
+        if not self.hotkey_enabled.get():
+            return
+        vk = HOTKEY_OPTIONS.get(self.hotkey_name.get(), 0x78)
+        down = is_key_down(vk)
+        if down and not self._hotkey_was_down:
+            self._capture_foreground_window()
+        self._hotkey_was_down = down
+        self.root.after(50, self._hotkey_poll)
+
+    def _capture_foreground_window(self):
+        bbox, title = get_foreground_client_rect()
+        if not bbox or bbox[2] <= bbox[0] or bbox[3] <= bbox[1]:
+            self._log("[Phím tắt] Không lấy được vùng cửa sổ hợp lệ, bỏ qua.")
+            return
+        try:
+            img = ImageGrab.grab(bbox=bbox)
+        except Exception as e:
+            self._log(f"[Phím tắt] Lỗi chụp màn hình: {e}")
+            return
+
+        folder = self.folder.get()
+        os.makedirs(folder, exist_ok=True)
+        idx = self._next_index(folder)
+        path = os.path.join(folder, f"capture_{idx:04d}.png")
+        img.save(path, "PNG")
+        self._log(f"[Phím tắt] Chụp cửa sổ '{title}' ({bbox[2]-bbox[0]}x{bbox[3]-bbox[1]}) -> {os.path.basename(path)}")
+        self._show_preview(path)
+        self._refresh_count()
+
     def paste_from_clipboard(self):
         folder = self.folder.get()
         os.makedirs(folder, exist_ok=True)
@@ -254,6 +374,7 @@ class CaptureApp:
 
 
 def main():
+    _make_process_dpi_aware()
     root = tk.Tk()
     CaptureApp(root)
     root.mainloop()
